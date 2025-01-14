@@ -1,0 +1,17 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y wget unzip && rm -rf /var/lib/apt/lists/* && \
+	pip install --upgrade pip
+
+# Copy requirements file and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt && \
+	python -m nltk.downloader punkt -d /usr/share/nltk_data
+
+# Copy the rest of the application
+COPY . .
+
+CMD ["python", "main.py"]

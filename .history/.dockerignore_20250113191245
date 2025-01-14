@@ -1,0 +1,20 @@
+# Ignore virtual environments
+venv/
+.venv/
+
+# Ignore output directories
+output/
+
+# Ignore Python cache and temporary files
+__pycache__/
+*.pyc
+*.log
+
+# Ignore raw_reports if not needed in the image
+raw_reports/
+
+# Ignore common OS and editor-specific files
+.DS_Store
+.idea/
+.vscode/
+.env

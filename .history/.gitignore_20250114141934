@@ -1,0 +1,23 @@
+# Ignore Python virtual environments
+venv/
+.venv/
+test_env/
+
+# Ignore compiled Python files
+*.pyc
+__pycache__/
+
+# Ignore log files
+*.log
+
+# Ignore output and temporary files
+output/
+raw_reports/
+
+# Ignore system and editor-specific files
+.DS_Store
+.idea/
+.vscode/
+
+# Ignore NLTK and other downloaded model data
+nltk_data/

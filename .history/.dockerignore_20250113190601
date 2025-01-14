@@ -1,0 +1,31 @@
+# Ignore virtual environments
+venv/
+.venv/
+
+# Ignore output directories
+output/
+
+# Ignore Python cache files
+*.pyc
+__pycache__/
+
+# Ignore log files
+*.log
+
+# Ignore common IDE/editor files
+.idea/
+.history/
+.vscode/
+*.swp
+
+# Ignore macOS-specific files
+.DS_Store
+
+# Ignore raw_reports if they're not required in the image
+raw_reports/
+
+# Ignore environment variables or sensitive files
+.env
+
+# Ignore Docker-related files (if using docker-compose)
+docker-compose.override.yml
