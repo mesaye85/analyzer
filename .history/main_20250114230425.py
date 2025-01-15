@@ -24,8 +24,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-# Use spaCy for sentence tokenization
+# Use spaCy instead of NLTK for more efficient sentence tokenization
 @contextmanager
 def load_spacy_model():
     try:
@@ -37,25 +36,18 @@ def load_spacy_model():
         nlp = spacy.load("en_core_web_sm", disable=["ner", "tagger", "parser"])
         yield nlp
 
-
 # Custom Exceptions
 class AnalyzerError(Exception):
     """Base exception for the analyzer."""
-
     pass
-
 
 class FileValidationError(AnalyzerError):
     """File validation errors."""
-
     pass
-
 
 class ModelOperationError(AnalyzerError):
     """Model operation errors."""
-
     pass
-
 
 # Decorators
 def handle_file_errors(func):
@@ -64,11 +56,9 @@ def handle_file_errors(func):
         try:
             return func(*args, **kwargs)
         except Exception as e:
-            logger.error("Error in %s: %s", func.__name__, str(e))
+            logger.error(f"Error in {func.__name__}: {str(e)}")
             raise FileValidationError(str(e))
-
     return wrapper
-
 
 @contextmanager
 def log_operation(operation_name: str):
@@ -80,11 +70,9 @@ def log_operation(operation_name: str):
         logger.error(f"{operation_name} failed: {e}")
         raise
 
-
 # ===============================
 # Utility Functions
 # ===============================
-
 
 @handle_file_errors
 def validate_file(file_path: Union[str, Path], max_size_mb: int = 100) -> bool:
@@ -98,7 +86,6 @@ def validate_file(file_path: Union[str, Path], max_size_mb: int = 100) -> bool:
         raise FileValidationError(f"File too large: {path}")
     return True
 
-
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 @handle_file_errors
 def extract_text_from_txt(file_path: Union[str, Path]) -> str:
@@ -110,23 +97,17 @@ def extract_text_from_txt(file_path: Union[str, Path]) -> str:
                 return file.read()
         except UnicodeDecodeError:
             continue
-    raise FileValidationError(
-        f"Unable to decode file with supported encodings: {file_path}"
-    )
-
+    raise FileValidationError(f"Unable to decode file with supported encodings: {file_path}")
 
 # ===============================
 # IOC Extraction
 # ===============================
 
-
 class IOCValidator:
     """Validator for different types of IOCs."""
-
+    
     @staticmethod
-    def validate_with_pattern(
-        value: str, pattern: str, additional_check: Optional[Callable] = None
-    ) -> bool:
+    def validate_with_pattern(value: str, pattern: str, additional_check: Optional[Callable] = None) -> bool:
         """Generic validation method."""
         try:
             if not re.match(pattern, value):
@@ -148,20 +129,16 @@ class IOCValidator:
         """Additional check for domain names."""
         return all(len(x) <= 63 for x in domain.split("."))
 
-
 class IOCExtractor:
     """Handle IOC extraction and validation."""
-
+    
     PATTERNS = {
         "ips": (r"\b(?:\d{1,3}\.){3}\d{1,3}\b", IOCValidator.check_ip_parts),
         "ipv6": (r"\b([a-fA-F0-9]{1,4}:){7}[a-fA-F0-9]{1,4}\b", None),
         "urls": (r"https?://[-\w.%[\da-fA-F]{2}]+", None),
         "emails": (r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", None),
         "hashes": (r"\b[a-fA-F0-9]{32,64}\b", None),
-        "domains": (
-            r"\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b",
-            IOCValidator.check_domain_length,
-        ),
+        "domains": (r"\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b", IOCValidator.check_domain_length),
     }
 
     @classmethod
@@ -170,26 +147,19 @@ class IOCExtractor:
         iocs = {key: [] for key in cls.PATTERNS}
         for ioc_type, (pattern, additional_check) in cls.PATTERNS.items():
             matches = re.findall(pattern, text)
-            iocs[ioc_type] = list(
-                set(
-                    match
-                    for match in matches
-                    if IOCValidator.validate_with_pattern(
-                        match, pattern, additional_check
-                    )
-                )
-            )
+            iocs[ioc_type] = list(set(
+                match for match in matches 
+                if IOCValidator.validate_with_pattern(match, pattern, additional_check)
+            ))
         return iocs
-
 
 # ===============================
 # Model Management
 # ===============================
 
-
 class ModelManager:
     """Handle model operations and caching."""
-
+    
     @staticmethod
     @lru_cache(maxsize=2)
     def get_model(model_name: str):
@@ -201,18 +171,15 @@ class ModelManager:
         except Exception as e:
             raise ModelOperationError(f"Error loading model {model_name}: {str(e)}")
 
-
 class MetricsManager:
     """Handle metrics collection and display."""
-
+    
     @staticmethod
     def collect_training_metrics(history, evaluator, val_data, val_labels, model):
         """Collect all training and validation metrics."""
         predictions = model.predict(val_data) > 0.5
         return {
-            "classification_metrics": evaluator.evaluate_classification(
-                val_labels, predictions
-            ),
+            "classification_metrics": evaluator.evaluate_classification(val_labels, predictions),
             "training_history": {
                 metric: float(history.history[metric][-1])
                 for metric in ["loss", "accuracy", "precision", "recall"]
@@ -225,12 +192,10 @@ class MetricsManager:
                 )
                 for metric in ["loss", "accuracy"]
             },
-            "epochs_trained": len(history.history["loss"]),
+            "epochs_trained": len(history.history["loss"])
         }
 
-    def format_and_save_metrics(
-        self, metrics: Dict[str, Any], model_dir: str, prefix: str = ""
-    ):
+    def format_and_save_metrics(self, metrics: Dict[str, Any], model_dir: str, prefix: str = ""):
         """Format metrics, display them, and save to file."""
         formatted_metrics = self._format_metrics(metrics)
         print(f"\n{prefix}Metrics:")
@@ -246,16 +211,10 @@ class MetricsManager:
             lines.append(f"\n{category.replace('_', ' ').title()}:")
             if isinstance(values, dict):
                 for key, value in values.items():
-                    formatted_value = (
-                        f"{value:.4f}" if isinstance(value, float) else str(value)
-                    )
-                    lines.append(
-                        f"  {key.replace('_', ' ').title()}: {formatted_value}"
-                    )
+                    formatted_value = f"{value:.4f}" if isinstance(value, float) else str(value)
+                    lines.append(f"  {key.replace('_', ' ').title()}: {formatted_value}")
             else:
-                formatted_value = (
-                    f"{values:.4f}" if isinstance(values, float) else str(values)
-                )
+                formatted_value = f"{values:.4f}" if isinstance(values, float) else str(values)
                 lines.append(f"  {formatted_value}")
         lines.append("=" * 50)
         return "\n".join(lines)
@@ -270,15 +229,13 @@ class MetricsManager:
             json.dump(metrics, f, indent=4)
         logger.info(f"Metrics saved to {metrics_file}")
 
-
 # ===============================
 # Neural Network Model
 # ===============================
 
-
 class ModelBuilder:
     """Handle neural network model creation and training."""
-
+    
     @staticmethod
     def build_model(
         vocab_size: int = 5000,
@@ -287,20 +244,14 @@ class ModelBuilder:
         lstm_units: int = 128,
     ) -> Sequential:
         """Build and compile the neural network model."""
-        model = Sequential(
-            [
-                Embedding(
-                    input_dim=vocab_size,
-                    output_dim=embedding_dim,
-                    input_length=input_length,
-                ),
-                LSTM(lstm_units, return_sequences=True),
-                LSTM(lstm_units),
-                Dense(64, activation="relu"),
-                Dense(1, activation="sigmoid"),
-            ]
-        )
-
+        model = Sequential([
+            Embedding(input_dim=vocab_size, output_dim=embedding_dim, input_length=input_length),
+            LSTM(lstm_units, return_sequences=True),
+            LSTM(lstm_units),
+            Dense(64, activation="relu"),
+            Dense(1, activation="sigmoid"),
+        ])
+        
         model.compile(
             optimizer="adam",
             loss="binary_crossentropy",
@@ -312,22 +263,20 @@ class ModelBuilder:
     def train_model(data, labels, model_dir: str = "models"):
         """Train the neural network model with metrics collection."""
         Path(model_dir).mkdir(parents=True, exist_ok=True)
-
+        
         with log_operation("model training"):
             model = ModelBuilder.build_model()
             metrics_manager = MetricsManager()
-
+            
             callbacks = [
-                EarlyStopping(
-                    monitor="val_loss", patience=3, restore_best_weights=True
-                ),
+                EarlyStopping(monitor="val_loss", patience=3, restore_best_weights=True),
                 ModelCheckpoint(
                     filepath=str(Path(model_dir) / "best_model.h5"),
                     monitor="val_loss",
                     save_best_only=True,
                 ),
             ]
-
+            
             history = model.fit(
                 data,
                 labels,
@@ -337,31 +286,20 @@ class ModelBuilder:
                 callbacks=callbacks,
                 verbose=1,
             )
-
-            val_data = data[int(len(data) * 0.8) :]
-            val_labels = labels[int(len(labels) * 0.8) :]
-
+            
+            val_data = data[int(len(data) * 0.8):]
+            val_labels = labels[int(len(labels) * 0.8):]
+            
             metrics = metrics_manager.collect_training_metrics(
                 history, ModelEvaluator(), val_data, val_labels, model
             )
             metrics_manager.format_and_save_metrics(metrics, model_dir)
-
+            
             return model, metrics
-
-
-class ModelEvaluator:
-    @staticmethod
-    def evaluate_classification(true_labels, predictions):
-        precision, recall, f1, _ = precision_recall_fscore_support(
-            true_labels, predictions, average="binary"
-        )
-        return {"precision": precision, "recall": recall, "f1_score": f1}
-
 
 # ===============================
 # Main Execution
 # ===============================
-
 
 def process_files(raw_reports_dir: str) -> List[Dict]:
     """Process all files in the directory."""
@@ -377,35 +315,31 @@ def process_files(raw_reports_dir: str) -> List[Dict]:
                 logger.error(f"Error processing {filename}: {str(e)}")
     return results
 
-
 def save_results(results: List[Dict], output_dir: str = "output"):
     """Save and display results."""
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-
+    
     if not results:
         logger.warning("No results were generated")
         return
-
-    df = pd.DataFrame(
-        [
-            {"file": item["file"], "ioc_type": ioc_type, "ioc": ioc}
-            for item in results
-            for ioc_type, iocs in item["iocs"].items()
-            for ioc in iocs
-        ]
-    )
-
+    
+    df = pd.DataFrame([
+        {"file": item["file"], "ioc_type": ioc_type, "ioc": ioc}
+        for item in results
+        for ioc_type, iocs in item["iocs"].items()
+        for ioc in iocs
+    ])
+    
     df.to_csv(Path(output_dir) / "extracted_iocs.csv", index=False)
-
+    
     metrics = {
         "total_files_processed": len(results),
         "total_iocs_found": len(df),
         "iocs_by_type": df["ioc_type"].value_counts().to_dict(),
         "files_with_iocs": df["file"].nunique(),
     }
-
+    
     MetricsManager().format_and_save_metrics(metrics, output_dir, "IOC Extraction ")
-
 
 def main():
     """Main execution function."""
@@ -417,7 +351,6 @@ def main():
     except Exception as e:
         logger.error(f"Fatal error in main execution: {str(e)}")
         raise
-
 
 if __name__ == "__main__":
     main()

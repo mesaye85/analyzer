@@ -349,15 +349,6 @@ class ModelBuilder:
             return model, metrics
 
 
-class ModelEvaluator:
-    @staticmethod
-    def evaluate_classification(true_labels, predictions):
-        precision, recall, f1, _ = precision_recall_fscore_support(
-            true_labels, predictions, average="binary"
-        )
-        return {"precision": precision, "recall": recall, "f1_score": f1}
-
-
 # ===============================
 # Main Execution
 # ===============================

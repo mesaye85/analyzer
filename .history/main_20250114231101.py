@@ -38,6 +38,15 @@ def load_spacy_model():
         yield nlp
 
 
+class ModelEvaluator:
+    @staticmethod
+    def evaluate_classification(true_labels, predictions):
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            true_labels, predictions, average="binary"
+        )
+        return {"precision": precision, "recall": recall, "f1_score": f1}
+
+
 # Custom Exceptions
 class AnalyzerError(Exception):
     """Base exception for the analyzer."""
@@ -347,15 +356,6 @@ class ModelBuilder:
             metrics_manager.format_and_save_metrics(metrics, model_dir)
 
             return model, metrics
-
-
-class ModelEvaluator:
-    @staticmethod
-    def evaluate_classification(true_labels, predictions):
-        precision, recall, f1, _ = precision_recall_fscore_support(
-            true_labels, predictions, average="binary"
-        )
-        return {"precision": precision, "recall": recall, "f1_score": f1}
 
 
 # ===============================

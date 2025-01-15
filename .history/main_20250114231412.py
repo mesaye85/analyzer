@@ -38,6 +38,8 @@ def load_spacy_model():
         yield nlp
 
 
+
+
 # Custom Exceptions
 class AnalyzerError(Exception):
     """Base exception for the analyzer."""
@@ -356,7 +358,6 @@ class ModelEvaluator:
             true_labels, predictions, average="binary"
         )
         return {"precision": precision, "recall": recall, "f1_score": f1}
-
 
 # ===============================
 # Main Execution

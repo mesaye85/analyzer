@@ -4,6 +4,17 @@ import logging
 import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any, Callable
+
+# Define or import ModelEvaluator
+class ModelEvaluator:
+    @staticmethod
+    def evaluate_classification(true_labels, predictions):
+        precision, recall, f1, _ = precision_recall_fscore_support(true_labels, predictions, average='binary')
+        return {
+            "precision": precision,
+            "recall": recall,
+            "f1_score": f1
+        }
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from sklearn.metrics import precision_recall_fscore_support
 from keras.models import Sequential
@@ -25,7 +36,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Use spaCy for sentence tokenization
+# Use spaCy instead of NLTK for more efficient sentence tokenization
 @contextmanager
 def load_spacy_model():
     try:
@@ -347,15 +358,6 @@ class ModelBuilder:
             metrics_manager.format_and_save_metrics(metrics, model_dir)
 
             return model, metrics
-
-
-class ModelEvaluator:
-    @staticmethod
-    def evaluate_classification(true_labels, predictions):
-        precision, recall, f1, _ = precision_recall_fscore_support(
-            true_labels, predictions, average="binary"
-        )
-        return {"precision": precision, "recall": recall, "f1_score": f1}
 
 
 # ===============================
