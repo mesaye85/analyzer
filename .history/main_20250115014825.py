@@ -165,22 +165,6 @@ def extract_iocs(text: str) -> Dict[str, List[str]]:
             
     return iocs
 
-def summarize_long_text(text: str, model_name: str) -> str:
-    """
-    Summarize long text using a pre-trained model.
-    
-    Args:
-        text: Text to summarize
-        model_name: Name of the pre-trained model
-        
-    Returns:
-        str: Summarized text
-    """
-    tokenizer, model = get_model(model_name)
-    inputs = tokenizer.encode("summarize: " + text, return_tensors="pt", max_length=512, truncation=True)
-    summary_ids = model.generate(inputs, max_length=150, min_length=40, length_penalty=2.0, num_beams=4, early_stopping=True)
-    return tokenizer.decode(summary_ids[0], skip_special_tokens=True)
-
 def process_files_with_summary(dir_path, model_name="t5-small", output_file="output/summaries.txt"):
     ensure_directory(os.path.dirname(output_file))
     with open(output_file, "w", encoding="utf-8") as output:
@@ -197,7 +181,7 @@ def process_files_with_summary(dir_path, model_name="t5-small", output_file="out
                     output.write(f"Summary for {filename}:\n{summary}\n\n")
                     print(f"Processed {filename}")
                 except Exception as e:
-                    logger.error("Error summarizing %s: %s", file_path, e)
+                    logger.error(f"Error summarizing {file_path}: {e}")
 
 # ===============================
 # Model Management

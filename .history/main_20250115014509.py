@@ -165,39 +165,172 @@ def extract_iocs(text: str) -> Dict[str, List[str]]:
             
     return iocs
 
-def summarize_long_text(text: str, model_name: str) -> str:
+import os
+import re
+import logging
+import pandas as pd
+from pathlib import Path
+from typing import Dict, List, Optional, Union
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from sklearn.metrics import precision_recall_fscore_support
+from keras.models import Sequential
+from tensorflow.keras.layers import Embedding, LSTM, Dense
+from keras.callbacks import EarlyStopping, ModelCheckpoint
+import spacy
+from functools import lru_cache
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('analyzer.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Use spaCy instead of NLTK for more efficient sentence tokenization
+try:
+    nlp = spacy.load('en_core_web_sm', disable=['ner', 'tagger', 'parser'])
+except OSError:
+    logger.info("Downloading spaCy model...")
+    os.system('python -m spacy download en_core_web_sm')
+    nlp = spacy.load('en_core_web_sm', disable=['ner', 'tagger', 'parser'])
+
+class FileValidationError(Exception):
+    """Custom exception for file validation errors."""
+    pass
+
+class ModelOperationError(Exception):
+    """Custom exception for model operation errors."""
+    pass
+
+# ===============================
+# Utility Functions
+# ===============================
+
+def validate_file(file_path: Union[str, Path], max_size_mb: int = 100) -> bool:
     """
-    Summarize long text using a pre-trained model.
+    Validate file before processing.
     
     Args:
-        text: Text to summarize
-        model_name: Name of the pre-trained model
+        file_path: Path to the file
+        max_size_mb: Maximum allowed file size in MB
         
     Returns:
-        str: Summarized text
+        bool: True if file is valid
+        
+    Raises:
+        FileValidationError: If file validation fails
     """
-    tokenizer, model = get_model(model_name)
-    inputs = tokenizer.encode("summarize: " + text, return_tensors="pt", max_length=512, truncation=True)
-    summary_ids = model.generate(inputs, max_length=150, min_length=40, length_penalty=2.0, num_beams=4, early_stopping=True)
-    return tokenizer.decode(summary_ids[0], skip_special_tokens=True)
+    path = Path(file_path)
+    
+    if not path.exists():
+        raise FileValidationError(f"File not found: {file_path}")
+    
+    if not path.is_file():
+        raise FileValidationError(f"Not a file: {file_path}")
+        
+    if path.suffix.lower() != '.txt':
+        raise FileValidationError(f"Invalid file type: {path.suffix}")
+        
+    if path.stat().st_size > max_size_mb * 1024 * 1024:
+        raise FileValidationError(f"File too large: {file_path}")
+        
+    return True
 
-def process_files_with_summary(dir_path, model_name="t5-small", output_file="output/summaries.txt"):
-    ensure_directory(os.path.dirname(output_file))
-    with open(output_file, "w", encoding="utf-8") as output:
-        for filename in os.listdir(dir_path):
-            if filename.endswith(".txt"):
-                file_path = os.path.join(dir_path, filename)
-                try:
-                    text = extract_text_from_txt(file_path)
-                    if not text.strip():
-                        logger.warning(f"Empty file: {file_path}")
-                        continue
-                    
-                    summary = summarize_long_text(text, model_name)
-                    output.write(f"Summary for {filename}:\n{summary}\n\n")
-                    print(f"Processed {filename}")
-                except Exception as e:
-                    logger.error("Error summarizing %s: %s", file_path, e)
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+def extract_text_from_txt(file_path: Union[str, Path]) -> str:
+    """
+    Extract text content from a file with retry logic.
+    
+    Args:
+        file_path: Path to the file
+        
+    Returns:
+        str: Extracted text content
+        
+    Raises:
+        FileValidationError: If file operations fail
+    """
+    try:
+        validate_file(file_path)
+        encodings = ['utf-8', 'latin-1', 'cp1252']
+        
+        for encoding in encodings:
+            try:
+                with open(file_path, "r", encoding=encoding) as file:
+                    return file.read()
+            except UnicodeDecodeError:
+                continue
+                
+        raise FileValidationError(f"Unable to decode file with any supported encoding: {file_path}")
+        
+    except Exception as e:
+        logger.error(f"Error reading file {file_path}: {str(e)}")
+        raise FileValidationError(f"Error reading file: {str(e)}")
+
+# ===============================
+# IOC Extraction
+# ===============================
+
+class IOCValidator:
+    """Validator for different types of IOCs."""
+    
+    @staticmethod
+    def validate_ip(ip: str) -> bool:
+        """Validate IPv4 address."""
+        try:
+            parts = ip.split('.')
+            return len(parts) == 4 and all(0 <= int(part) <= 255 for part in parts)
+        except (AttributeError, TypeError, ValueError):
+            return False
+            
+    @staticmethod
+    def validate_domain(domain: str) -> bool:
+        """Validate domain name."""
+        if len(domain) > 255:
+            return False
+        if domain[-1] == ".":
+            domain = domain[:-1]
+        allowed = re.compile(r"^[a-zA-Z0-9-_]+(\.[a-zA-Z0-9-_]+)*$")
+        return all(len(x) <= 63 for x in domain.split(".")) and bool(allowed.match(domain))
+
+def extract_iocs(text: str) -> Dict[str, List[str]]:
+    """
+    Extract and validate IOCs using regex patterns.
+    
+    Args:
+        text: Input text to extract IOCs from
+        
+    Returns:
+        Dict containing validated IOCs by type
+    """
+    patterns = {
+        "ips": r"\b(?:\d{1,3}\.){3}\d{1,3}\b",
+        "ipv6": r"\b([a-fA-F0-9]{1,4}:){7}[a-fA-F0-9]{1,4}\b",
+        "urls": r"https?://[-\w.%[\da-fA-F]{2}]+",
+        "emails": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+        "hashes": r"\b[a-fA-F0-9]{32,64}\b",
+        "domains": r"\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b",
+    }
+
+    iocs = {key: [] for key in patterns}
+    
+    for ioc_type, pattern in patterns.items():
+        matches = re.findall(pattern, text)
+        
+        # Validate and deduplicate IOCs
+        if ioc_type == "ips":
+            iocs[ioc_type] = list(set(ip for ip in matches if IOCValidator.validate_ip(ip)))
+        elif ioc_type == "domains":
+            iocs[ioc_type] = list(set(domain for domain in matches if IOCValidator.validate_domain(domain)))
+        else:
+            iocs[ioc_type] = list(set(matches))
+            
+    return iocs
 
 # ===============================
 # Model Management
