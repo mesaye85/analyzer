@@ -21,3 +21,6 @@ raw_reports/
 
 # Ignore NLTK and other downloaded model data
 nltk_data/
+
+# Editor local-history snapshots
+.history/
