@@ -1,102 +1,64 @@
-Analyzer
+# Analyzer
 
-Analyzer is a robust Python toolkit for processing textual files, extracting Indicators of Compromise (IOCs), and training neural network models for classification tasks. It features a modular architecture with extensive logging, error handling, and metrics reporting for effective cybersecurity and text analytics workflows.
+A command-line Python tool that scans plain-text threat reports and extracts indicators of compromise (IPv4 addresses, URLs, email addresses, file hashes, domains) into a CSV, with a JSON summary of counts per type.
 
-Features
+## Context
 
-IOC Extraction: Scans files and extracts IOCs such as IP addresses, domains, URLs, emails, and hashes using advanced regular expressions and validation heuristics.
-Neural Network Model Training: Build and train LSTM-based models for binary classification tasks with Keras, including callbacks for early stopping and checkpointing.
-Metrics Reporting: Collects and saves detailed training and extraction metrics in both human-readable and JSON formats.
-Robust File Handling: Validates file types, sizes, and encodings; handles errors gracefully and logs all operations.
-Caching & Retry Logic: Efficient model loading with caching and robust retry logic for file reading.
-Extensive Logging: All operations are logged to both console and file.
-Requirements
+I built this in January 2025 as a practice project for turning unstructured threat-intel text into structured data. Earlier iterations (visible in the git history) also tried T5 summarization and spaCy tokenization; the current version settled on regex extraction with validation, plus an LSTM classifier scaffold that is not yet wired in.
 
-Python 3.7+
-pip install -r requirements.txt
-Main Dependencies
+## Stack
 
-pandas
-scikit-learn
-keras, tensorflow
-transformers
-spacy
-tenacity
-Installation
+- Python 3.10 (Dockerfile) / 3.11 (pins were compiled with pip-compile on 3.11)
+- pandas for output, `re` for extraction, tenacity for read retries
+- TensorFlow/Keras 3, transformers and spaCy are imported but only used by the unwired model code
+- Pinned dependencies in `requirements.txt`, generated from `requirements.in`
 
-Clone the repository:
-bash
-git clone https://github.com/mesaye85/analyzer.git
-cd analyzer
-Install dependencies:
-bash
-pip install -r requirements.txt
-Download the spaCy English model (if not downloaded automatically):
-bash
-python -m spacy download en_core_web_sm
-Usage
+## How it works
 
-1. Prepare Input Data
+1. `process_files()` walks `raw_reports/`, validates each file (`.txt` only, under 100 MB) and reads it, trying utf-8, latin-1 and cp1252 in turn.
+2. `IOCExtractor.extract_iocs()` runs each pattern in `IOCExtractor.PATTERNS`, applies an optional validator (IPv4 octets 0-255, domain labels at most 63 chars), and de-duplicates per file.
+3. `save_results()` writes `output/extracted_iocs.csv` (`file,ioc_type,ioc`) and `output/metrics_<timestamp>.json`.
 
-Place your .txt files containing raw reports into the raw_reports/ directory.
-Only .txt files under 100 MB are processed.
-2. Run the Analyzer
+`ModelBuilder` (embedding + two LSTM layers, binary output) and `ModelManager` (Hugging Face seq2seq loader) are defined but never called from `main()`.
 
-bash
+## Running it
+
+Use Python 3.10 or 3.11; the pinned `blis==1.2.0` (via spaCy) does not install on 3.13.
+
+```bash
+python3.11 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt tenacity   # tenacity is not in requirements.txt yet
+mkdir -p raw_reports && cp your_report.txt raw_reports/
 python main.py
-3. Outputs
+```
 
-All extracted IOCs are saved in output/extracted_iocs.csv.
-Metrics and summary statistics are saved in the output/ directory as JSON files and also logged.
-4. Logs
+The install pulls TensorFlow, so expect it to be large. Logs go to `analyzer.log`.
 
-Operation logs are saved in analyzer.log.
-Project Structure
+Docker: the image currently fails at import because `tenacity` is not in `requirements.txt`. Once it is added, mount the input and output directories (`.dockerignore` excludes them):
 
-Code
-analyzer/
-│
-├── main.py            # Main application file
-├── requirements.txt   # Python dependencies
-├── raw_reports/       # Directory for input .txt files
-├── output/            # Results and metrics output
-└── analyzer.log       # Log file
-Components Overview
+```bash
+docker build -t analyzer .
+docker run --rm -v "$PWD/raw_reports:/app/raw_reports" -v "$PWD/output:/app/output" analyzer
+```
 
-IOC Extraction:
-Uses regular expressions and additional validation for accuracy. Supported types: IPs (v4/v6), domains, URLs, emails, hashes.
+## Status
 
-Model Training:
+Prototype. The extraction path works end to end on `.txt` input. There are no tests and no CLI arguments.
 
-Builds a two-layer LSTM with embedding for sequence classification.
-Trained on provided data with early stopping and checkpointing.
-Reports training/validation metrics.
-Metrics Management:
+## Known gaps
 
-Aggregates and formats metrics.
-Saves metrics as JSON with timestamped filenames.
-Error Handling & Logging:
+- `main.py` `PATTERNS["ipv6"]` uses a capturing group, so `re.findall` returns only the last group (e.g. `0370:`) and the validator then drops it. IPv6 addresses are never reported.
+- `PATTERNS["urls"]` has a malformed character class (`[-\w.%[\da-fA-F]{2}]+`) and fails to match ordinary URLs such as `https://example.com/path`; the host is picked up as a domain instead.
+- `PATTERNS["domains"]` matches file names (`report.txt`, `malware.exe`). There is no TLD allow-list or defanging support (`hxxp`, `[.]`).
+- `PATTERNS["hashes"]` (`{32,64}`) also accepts 33-63 character hex strings that are not MD5/SHA-1/SHA-256.
+- One non-`.txt` file in `raw_reports/` aborts the run: tenacity retries the validation error three times, then raises `RetryError`, which `process_files()` does not catch.
+- If no IOCs are found, `save_results()` raises `KeyError: 'ioc_type'` on the empty DataFrame. A missing `raw_reports/` raises `FileNotFoundError`.
+- `tenacity` is imported but missing from `requirements.in` and `requirements.txt`; `nltk` is installed (and the Dockerfile downloads `punkt`) but never used.
+- Dockerfile: `--only-binary=:all:` plus the build toolchain is redundant, and the image carries TensorFlow for a regex-only workload.
+- No `LICENSE` file, although an earlier version of this README said MIT.
 
-Custom exceptions for file and model operations.
-All errors, warnings, and info events are logged.
-Extending
+## What I'd do next
 
-Add new IOC patterns in the IOCExtractor.PATTERNS dictionary in main.py.
-Modify ModelBuilder for different neural network architectures.
-Integrate with other input formats by extending the file validation and extraction logic.
-Troubleshooting
-
-If spaCy model is missing, it will be downloaded automatically. If not, run:
-bash
-python -m spacy download en_core_web_sm
-Ensure all input files are .txt and under the size limit.
-Check analyzer.log for detailed error messages and stack traces.
-License
-
-MIT License
-
-Author
-
-Mesaye Addisu
-
-
+- Fix the IPv6 and URL patterns, add defang handling, and cover each IOC type with pytest fixtures (true and false positives).
+- Make the per-file error handling catch `RetryError`, handle the empty-result case, and take input/output paths as arguments.
+- Move the ML code to an optional module so the default install is pandas + tenacity only.
