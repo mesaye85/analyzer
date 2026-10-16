@@ -3,9 +3,10 @@ venv/
 .venv/
 test_env/
 
-# Ignore compiled Python files
+# Ignore compiled Python files and test cache
 *.pyc
 __pycache__/
+.pytest_cache/
 
 # Ignore log files
 *.log
