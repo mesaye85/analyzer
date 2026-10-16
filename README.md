@@ -1,64 +1,94 @@
 # Analyzer
 
-A command-line Python tool that scans plain-text threat reports and extracts indicators of compromise (IPv4 addresses, URLs, email addresses, file hashes, domains) into a CSV, with a JSON summary of counts per type.
+A command-line Python tool that extracts indicators of compromise (IOCs) from plain-text threat reports and writes them to a CSV with a JSON summary. It uses only the Python standard library.
 
-## Context
+## What it extracts
 
-I built this in January 2025 as a practice project for turning unstructured threat-intel text into structured data. Earlier iterations (visible in the git history) also tried T5 summarization and spaCy tokenization; the current version settled on regex extraction with validation, plus an LSTM classifier scaffold that is not yet wired in.
+| Type | How it is matched |
+| --- | --- |
+| `ipv4` | Dotted quad, validated with `ipaddress`. |
+| `ipv6` | Hex/colon tokens with at least two colons (`::` compression allowed, `%zone` stripped), validated with `ipaddress.IPv6Address`. Times such as `12:30:45` are not valid addresses and are dropped. |
+| `url` | `http`, `https` and `ftp`. A URL ends at whitespace, quotes or brackets; trailing `.,;:!?*` is stripped. |
+| `domain` | Labels of 1-63 letters, digits or hyphens (no leading/trailing hyphen), total length up to 253, alphabetic TLD of 2-24 characters. Tokens ending in a common file extension (`report.txt`, `loader.dll`) are skipped, as are domains that are part of an email address. |
+| `email` | `local@domain`, with the domain checked as above. |
+| `md5`, `sha1`, `sha256` | Hex tokens of exactly 32, 40 or 64 characters. Other lengths are ignored. |
 
-## Stack
+Before matching, common defanging is reversed: `hxxp`/`hxxps`, `[.]`, `(.)`, `{.}`, `[dot]`, `[:]`, `[://]`, `[@]` and `[at]`.
 
-- Python 3.10 (Dockerfile) / 3.11 (pins were compiled with pip-compile on 3.11)
-- pandas for output, `re` for extraction, tenacity for read retries
-- TensorFlow/Keras 3, transformers and spaCy are imported but only used by the unwired model code
-- Pinned dependencies in `requirements.txt`, generated from `requirements.in`
+Each indicator is reported once per file, in first-seen order. The `note` column records:
 
-## How it works
-
-1. `process_files()` walks `raw_reports/`, validates each file (`.txt` only, under 100 MB) and reads it, trying utf-8, latin-1 and cp1252 in turn.
-2. `IOCExtractor.extract_iocs()` runs each pattern in `IOCExtractor.PATTERNS`, applies an optional validator (IPv4 octets 0-255, domain labels at most 63 chars), and de-duplicates per file.
-3. `save_results()` writes `output/extracted_iocs.csv` (`file,ioc_type,ioc`) and `output/metrics_<timestamp>.json`.
-
-`ModelBuilder` (embedding + two LSTM layers, binary output) and `ModelManager` (Hugging Face seq2seq loader) are defined but never called from `main()`.
+- `scope=` for IPs: `global`, `private`, `loopback`, `link-local`, `multicast`, `reserved`, `unspecified` or `non-global`, from Python's `ipaddress` properties. Nothing is filtered on scope. `private` follows `ipaddress.is_private`, so documentation ranges such as `192.0.2.0/24`, `203.0.113.0/24` and `2001:db8::/32` count as private.
+- `from url` for a domain taken from a URL host. The URL's host is also reported as a domain.
+- `refanged` when the indicator was defanged in the source text.
 
 ## Running it
 
-Use Python 3.10 or 3.11; the pinned `blis==1.2.0` (via spaCy) does not install on 3.13.
+Python 3.11 or later (tested on 3.11, 3.12 and 3.13). There is nothing to install for the tool itself.
 
 ```bash
-python3.11 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt tenacity   # tenacity is not in requirements.txt yet
 mkdir -p raw_reports && cp your_report.txt raw_reports/
-python main.py
+python main.py                        # reads raw_reports/, writes output/
+python main.py --input reports --output results --max-size-mb 50 --log-file run.log
 ```
 
-The install pulls TensorFlow, so expect it to be large. Logs go to `analyzer.log`.
+Only `.txt` files are read. Other files, and files over `--max-size-mb` (default 100), are skipped with a warning and listed in the summary. A file with no indicators is fine. A missing input directory exits with code 2. Files are decoded as UTF-8, falling back to cp1252 and then latin-1.
 
-Docker: the image currently fails at import because `tenacity` is not in `requirements.txt`. Once it is added, mount the input and output directories (`.dockerignore` excludes them):
+With Docker:
 
 ```bash
 docker build -t analyzer .
 docker run --rm -v "$PWD/raw_reports:/app/raw_reports" -v "$PWD/output:/app/output" analyzer
 ```
 
-## Status
+## Output
 
-Prototype. The extraction path works end to end on `.txt` input. There are no tests and no CLI arguments.
+`output/extracted_iocs.csv`:
 
-## Known gaps
+```
+file,ioc_type,ioc,note
+campaign.txt,ipv4,185.220.101.47,scope=global; refanged
+campaign.txt,ipv6,2001:db8:4f::1d,scope=private
+campaign.txt,url,https://cdn-update.freight-billing.com/api/v2/check?id=7f3a,refanged
+campaign.txt,domain,cdn-update.freight-billing.com,from url; refanged
+campaign.txt,sha256,9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08,
+```
 
-- `main.py` `PATTERNS["ipv6"]` uses a capturing group, so `re.findall` returns only the last group (e.g. `0370:`) and the validator then drops it. IPv6 addresses are never reported.
-- `PATTERNS["urls"]` has a malformed character class (`[-\w.%[\da-fA-F]{2}]+`) and fails to match ordinary URLs such as `https://example.com/path`; the host is picked up as a domain instead.
-- `PATTERNS["domains"]` matches file names (`report.txt`, `malware.exe`). There is no TLD allow-list or defanging support (`hxxp`, `[.]`).
-- `PATTERNS["hashes"]` (`{32,64}`) also accepts 33-63 character hex strings that are not MD5/SHA-1/SHA-256.
-- One non-`.txt` file in `raw_reports/` aborts the run: tenacity retries the validation error three times, then raises `RetryError`, which `process_files()` does not catch.
-- If no IOCs are found, `save_results()` raises `KeyError: 'ioc_type'` on the empty DataFrame. A missing `raw_reports/` raises `FileNotFoundError`.
-- `tenacity` is imported but missing from `requirements.in` and `requirements.txt`; `nltk` is installed (and the Dockerfile downloads `punkt`) but never used.
-- Dockerfile: `--only-binary=:all:` plus the build toolchain is redundant, and the image carries TensorFlow for a regex-only workload.
-- No `LICENSE` file, although an earlier version of this README said MIT.
+`output/summary.json` has files processed and skipped (with reasons), files with indicators, the total, and counts per type.
 
-## What I'd do next
+## Tests
 
-- Fix the IPv6 and URL patterns, add defang handling, and cover each IOC type with pytest fixtures (true and false positives).
-- Make the per-file error handling catch `RetryError`, handle the empty-result case, and take input/output paths as arguments.
-- Move the ML code to an optional module so the default install is pandas + tenacity only.
+```bash
+pip install -r requirements-dev.txt
+pytest
+flake8 ioc_analyzer tests main.py
+```
+
+The tests cover each indicator type with positive and negative cases, plus an end-to-end CLI run. GitHub Actions runs flake8 and pytest on every push and pull request (`.github/workflows/tests.yml`).
+
+## Limitations
+
+This is regex extraction with structural checks. It finds strings that look like indicators, not strings that are malicious.
+
+- No reputation or context. Vendor sites, reference links (for example `attack.mitre.org`), the report author's own email and documentation IPs are all reported. Expect to review the output.
+- False positives from text that only resembles an indicator: code identifiers (`os.path`), file names whose extension is not on the skip list (`config.yaml`), abbreviations such as `Mr.Smith`, and any hex string of the right length (a git commit ID is reported as `sha1`).
+- No TLD list. Any alphabetic TLD of 2-24 characters is accepted, so `foo.bar` is a domain and so is `example.zip` if it appears inside a URL. Outside a URL, a name whose last label is a common file extension is dropped, which also drops real domains under TLDs like `.zip`.
+- Domains inside URLs are reported twice by design: once in the URL and once as a domain.
+- False negatives from defanging styles not listed above (`evil(dot)com`, `evil . com`), indicators split across lines, internationalized domain names in Unicode, and punycode TLDs (`xn--p1ai`). Punycode in other labels is matched.
+- Only `.txt` files are read. Indicators in PDF, HTML, Word or email files are not extracted unless converted to text first.
+- IPs written in other forms (decimal integers, hex, CIDR suffixes) are not normalized; `10.0.0.0/8` is reported as `10.0.0.0`.
+
+## Layout
+
+- `ioc_analyzer/extract.py`: extraction and validation
+- `ioc_analyzer/cli.py`: arguments, file handling, CSV and JSON output
+- `main.py`: entry point
+- `tests/`: pytest suite
+- `experimental/`: unused model code (see below)
+
+## History
+
+I started this in January 2025 as a practice project for turning unstructured threat-intel text into structured data. The repo once included an LSTM classifier and Hugging Face transformer loading that were never wired into the pipeline, because there was no labeled data to train them on. That code now lives in `experimental/lstm_classifier.py`, with its dependencies in `requirements-ml.txt`. It is not part of the tool. I later rewrote the extraction, which had several broken patterns (IPv6 addresses and ordinary URLs never matched, file names were reported as domains), and added the CLI options and tests.
+
+## License
+
+MIT License — see [LICENSE](LICENSE).
