@@ -1,22 +1,31 @@
-# Ignore virtual environments
+# Version control and CI
+.git/
+.github/
+
+# Virtual environments
 venv/
 .venv/
+test_env/
 
-# Ignore output directories
-output/
-
-# Ignore Python cache and temporary files
+# Python cache and logs
 __pycache__/
 *.pyc
+.pytest_cache/
 *.log
 
-# Ignore raw_reports if not needed in the image
+# Data: mount these at run time instead of baking them into the image
 raw_reports/
+output/
 
-# Ignore common OS and editor-specific files
+# Not needed in the runtime image
+tests/
+experimental/
+requirements-dev.txt
+requirements-ml.txt
+.history/
+
+# OS and editor files
 .DS_Store
 .idea/
 .vscode/
 .env
-
-test_env/

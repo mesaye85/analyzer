@@ -1,27 +1,19 @@
-FROM --platform=linux/amd64 python:3.10-slim
+FROM python:3.12-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Install system dependencies and build tools
-RUN apt-get update && apt-get install -y \
-    wget \
-    unzip \
-    build-essential \
-    gcc \
-    g++ \
-    make \
-    && rm -rf /var/lib/apt/lists/*
-
-# Upgrade pip
-RUN pip install --upgrade pip
-
-# Copy requirements file and install Python dependencies
+# The core tool is standard-library only; install requirements.txt only if it
+# lists any packages (comment and blank lines are ignored).
 COPY requirements.txt .
-RUN pip install --no-cache-dir --only-binary=:all: -r requirements.txt && \
-    python -m nltk.downloader punkt -d /usr/share/nltk_data
+RUN if grep -qvE '^\s*(#|$)' requirements.txt; then \
+        pip install --no-cache-dir -r requirements.txt; \
+    fi
 
-# Copy the rest of the application
-COPY . .
+COPY main.py .
+COPY ioc_analyzer/ ioc_analyzer/
 
+# Mount reports at /app/raw_reports and collect results from /app/output.
 CMD ["python", "main.py"]
